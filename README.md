@@ -34,6 +34,9 @@
 5. **导出结果**: 用户可以选择将识别结果导出为文件，方便后续使用。
 6. **生成条形码**: 用户可以输入数据生成 Code128 条形码，并保存为图像文件。
 
+！pip install opencv-contrib-python pillow qrcode numpy matplotlib scikit-image
+
+
 ## 贡献
 
 欢迎任何形式的贡献！如果您有建议或发现了错误，请提交问题或拉取请求。
