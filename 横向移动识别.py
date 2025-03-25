@@ -1,103 +1,90 @@
-#!/usr/bin/env python3
-from PIL import Image, ImageEnhance
-from pyzbar.pyzbar import decode
-import os
 import cv2
+from pyzbar import pyzbar
 import numpy as np
-# ----------------------------------------
-def preprocess_image(image, scale_factor, contrast_factor=2.0):
-    # 转换为灰度图
-    gray_image = image.convert('L')
-    
-    # 应用阈值化处理，将图像转为黑白
-    threshold_image = gray_image.point(lambda p: p > 150 and 255)
-    # 增强对比度
-    contrast_enhancer = ImageEnhance.Contrast(threshold_image)
-    enhanced_image = contrast_enhancer.enhance(contrast_factor)
-    # 放大图像以提高识别率
-    new_size = (int(enhanced_image.width * scale_factor), int(enhanced_image.height * scale_factor))
-    enlarged_image = enhanced_image.resize(new_size, Image.LANCZOS)
+
+def enhance_image(image, alpha=1.5, beta=50, scale_factor=2.0):
+    """
+    增强图像的对比度和亮度，并放大图像。
+    :param image: 输入图像
+    :param alpha: 对比度控制 (1.0-3.0)
+    :param beta: 亮度控制 (0-100)
+    :param scale_factor: 缩放因子
+    :return: 增强后的图像
+    """
+    # 调整对比度和亮度
+    enhanced_image = cv2.convertScaleAbs(image, alpha=alpha, beta=beta)
+    # 获取图像的尺寸
+    height, width = enhanced_image.shape[:2]
+    # 放大图像
+    enlarged_image = cv2.resize(
+        enhanced_image, 
+        (int(width * scale_factor), int(height * scale_factor)), 
+        interpolation=cv2.INTER_LINEAR
+    )
     return enlarged_image
-# ----------------------------------------
-def extract_barcodes_and_qrcodes(image_path, segment_width_percentage=30, overlap_percentage=20, scale_factor=2.0, contrast_factor=2.0, output_file='barcode_qrcode_results.txt'):
-    # 检查图像文件是否存在
-    if not os.path.exists(image_path):
-        print(f"Image file '{image_path}' does not exist.")
-        return
-    try:
-        # 打开图像
-        original_image = Image.open(image_path)
-    except Exception as e:
-        print(f"Error opening image: {e}")
-        return
-    # 获取图像宽度和高度
-    width, height = original_image.size
-    count = 0
-    detected_results = set()
-    # 打开输出文件
-    with open(output_file, 'w') as output:
-        # 计算每个段的宽度和重叠宽度
-        segment_width = int(width * (segment_width_percentage / 100.0))
-        overlap_width = int(segment_width * (overlap_percentage / 100.0))
-        left = 0
-        while left < width:
-            # 确定当前段的右边界
-            right = min(left + segment_width, width)
-            # 裁剪当前段
-            chunk = original_image.crop((left, 0, right, height))
-            # 预处理图像
-            preprocessed_image = preprocess_image(chunk, scale_factor, contrast_factor)
-            # 将PIL图像转换为OpenCV格式
-            open_cv_image = cv2.cvtColor(np.array(preprocessed_image), cv2.COLOR_RGB2BGR)
-            # 解码当前段中的条形码/二维码
-            decoded_objects = decode(preprocessed_image)
-            if decoded_objects:
-                output.write(f"Detected {len(decoded_objects)} objects in the chunk from {left} to {right}.\n")
-                print(f"Detected {len(decoded_objects)} objects in the chunk from {left} to {right}.")
-            # 遍历解码结果
-            for obj in decoded_objects:
-                barcode_data = obj.data.decode("utf-8")
-                unique_barcode = (barcode_data, (left + obj.rect.left, obj.rect.top))
-                # 检查是否已经检测到该条形码/二维码
-                if unique_barcode not in detected_results:
-                    detected_results.add(unique_barcode)
-                    count += 1
-                    barcode_type = obj.type
-                    rect = obj.rect
-                    position = {
-                        'left': left + rect.left,
-                        'top': rect.top,
-                        'width': rect.width,
-                        'height': rect.height
-                    }
-                    # 在条形码/二维码周围绘制矩形
-                    cv2.rectangle(open_cv_image, (rect.left, rect.top), 
-                                  (rect.left + rect.width, rect.top + rect.height), 
-                                  (0, 255, 0), 2)
-                    # 在图像上标记条形码/二维码数据和类型
-                    cv2.putText(open_cv_image, f'{barcode_type}: {barcode_data}', 
-                                (rect.left, rect.top - 10), cv2.FONT_HERSHEY_SIMPLEX, 
-                                0.5, (0, 255, 0), 2)
-                    # 将结果写入输出文件
-                    output.write(f"Barcode/Qrcode #{count}:\n")
-                    output.write(f"Type: {barcode_type}\n")
-                    output.write(f"Data: {barcode_data}\n")
-                    output.write(f"Position: Left={position['left']}, Top={position['top']}, Width={position['width']}, Height={position['height']}\n")
-                    output.write('-' * 30 + '\n')
-                    print(f"Barcode/Qrcode #{count}:")
-                    print(f"Type: {barcode_type}")
-                    print(f"Data: {barcode_data}")
-                    print(f"Position: Left={position['left']}, Top={position['top']}, Width={position['width']}, Height={position['height']}")
-                    print('-' * 30)
-            # 显示处理后的图像
-            # cv2.imshow('Processed Segment', open_cv_image)
-            # cv2.waitKey(0)  # 等待按键以继续
-            # cv2.destroyAllWindows()
-            # 移动到下一个段（包括重叠部分）
-            left += (segment_width - overlap_width)
-        # 写入检测到的总数
-        output.write(f"Total number of barcodes/QRCodes detected: {count}\n")
-        print(f"Total number of barcodes/QRCodes detected: {count}")
-# ----------------------------------------
-# 调用函数并设置参数
-extract_barcodes_and_qrcodes('selected_part_1.png', segment_width_percentage=30, overlap_percentage=20, scale_factor=2, contrast_factor=2, output_file='barcode_qrcode_results.txt')
+def decode_barcode(image):
+    """
+    使用 pyzbar 库解码条形码。
+    :param image: 输入图像
+    :return: 解码后的条形码对象列表
+    """
+    barcodes = pyzbar.decode(image)
+    return barcodes
+def process_image(image_path, slice_width=10, overlap_percent=0.2, alpha=1.5, beta=50, scale_factor=2.0):
+    """
+    处理图像，逐个切片解码条形码，并统计结果。
+    :param image_path: 图像文件路径
+    :param slice_width: 切片宽度
+    :param overlap_percent: 切片重叠比例 (0-1)
+    :param alpha: 对比度控制
+    :param beta: 亮度控制
+    :param scale_factor: 缩放因子
+    :return: 解码结果的列表，包含数据和类型
+    """
+    # 读取图像
+    image = cv2.imread(image_path)
+    # 增强图像
+    image = enhance_image(image, alpha=alpha, beta=beta, scale_factor=scale_factor)
+    # 获取图像的高度和宽度
+    height, width = image.shape[:2]
+    # 初始化一个集合来存储解码结果，避免重复
+    decoded_results = set()
+    # 计算重叠步长
+    step_size = int(slice_width * (1 - overlap_percent))
+    # 从左到右逐个切片并尝试解码
+    for x in range(0, width, step_size):
+        # 定义切片的右边界
+        x_end = min(x + slice_width, width)
+        # 提取图像的切片
+        slice_img = image[0:height, x:x_end]
+        # 解码切片
+        barcodes = decode_barcode(slice_img)
+        # 如果解码成功，将结果添加到集合中
+        for barcode in barcodes:
+            barcode_data = barcode.data.decode('utf-8')
+            barcode_type = barcode.type
+            decoded_results.add((barcode_data, barcode_type))
+    return list(decoded_results)
+# 示例调用
+image_path = '1742882753632.jpg'
+results = process_image(
+    image_path, 
+    slice_width=10, 
+    overlap_percent=0.2, 
+    alpha=1.5, 
+    beta=50, 
+    scale_factor=2.0
+)
+# 打印解码结果
+for data, barcode_type in results:
+    print(f"Data: {data}, Type: {barcode_type}")
+
+"""
+参数说明：
+- image_path: 图像文件路径，字符串类型。
+- slice_width: 切片宽度，整数类型，默认为10。
+- overlap_percent: 切片重叠比例，浮点数，范围为0到1，默认为0.2。
+- alpha: 对比度控制，浮点数，范围为1.0到3.0，默认为1.5。
+- beta: 亮度控制，整数类型，范围为0到100，默认为50。
+- scale_factor: 缩放因子，浮点数，默认为2.0。
+"""
